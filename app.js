@@ -1,27 +1,41 @@
+// ============================
+// CONFIG
+// ============================
 const THEMES_URL = "themes.txt";
-const CONTENTS_URL = "contents.txt";
-const STORAGE_KEY = "programme_tracker_status_v1";
 
-const Status = {
-  todo: "todo",
-  doing: "doing",
-  done: "done",
-};
+// Google Apps Script Web App
+const API_BASE_URL =
+  "https://script.google.com/macros/s/AKfycbxOmBCp514-IuS0euWRbiQ3oOWWeHgdpe5denBgSTfpSjYnU0mLpNTwFCl-vfiY-qZz/exec";
+const API_KEY = "fontenay2026_collab";
 
+// Local persistence (simple & robust)
+const STORAGE_KEY = "programme_2026_statuses_v1";
+
+// Status values
+const Status = { todo: "todo", doing: "doing", done: "done" };
+
+// ============================
+// UTILS
+// ============================
 function safeId(str) {
-  return str.trim().toLowerCase().replace(/\s+/g, " ").replace(/[^\p{L}\p{N}\s>-]/gu, "");
+  return String(str || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s>-]/gu, "")
+    .replace(/\s*>\s*/g, " > ");
 }
 
-function loadStatuses() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
+function setError(msg) {
+  const el = document.getElementById("error");
+  if (!el) return;
+  if (!msg) {
+    el.classList?.add("hidden");
+    el.textContent = "";
+  } else {
+    el.classList?.remove("hidden");
+    el.textContent = String(msg);
   }
-}
-
-function saveStatuses(obj) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
 }
 
 async function fetchText(url) {
@@ -30,9 +44,8 @@ async function fetchText(url) {
   return await r.text();
 }
 
-// themes.txt parser: indentation => hierarchy
 function parseThemes(text) {
-  const lines = text.split(/\r?\n/).map(l => l.replace(/\t/g, "  "));
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/\t/g, "  "));
   const themes = [];
   let currentTheme = null;
 
@@ -47,52 +60,40 @@ function parseThemes(text) {
       currentTheme = { name, items: [] };
       themes.push(currentTheme);
     } else {
-      if (!currentTheme) {
-        // if file starts with indented items, ignore
-        continue;
-      }
+      if (!currentTheme) continue;
       currentTheme.items.push({ name });
     }
   }
   return themes;
 }
 
-// contents.txt parser: blocks like [Theme] or [Theme > Item]
-// blocks separated by lines with ---
-function parseContents(text) {
-  const blocks = text.split(/\n---\n|\r\n---\r\n|\r\n---\n|\n---\r\n/);
-  const map = {};
-
-  for (const block of blocks) {
-    const lines = block.split(/\r?\n/);
-    let key = null;
-    let body = [];
-    for (const l of lines) {
-      const m = l.match(/^\s*\[(.+?)\]\s*$/);
-      if (m) {
-        key = m[1].trim();
-        continue;
-      }
-      if (key) body.push(l);
-    }
-    if (key) map[key] = body.join("\n").trim();
+function loadStatuses() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === "object" ? obj : {};
+  } catch {
+    return {};
   }
-  return map;
 }
 
-function getContent(contentsMap, themeName, itemName = null) {
-  if (!itemName) {
-    return contentsMap[themeName] || "";
-  }
-  const k = `${themeName} > ${itemName}`;
-  return contentsMap[k] || "";
+function saveStatuses(statuses) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+}
+
+function pct(n, d) {
+  if (!d) return 0;
+  return Math.round((n / d) * 100);
 }
 
 function computeStats(themes, statuses) {
-  let total = 0, done = 0, doing = 0, todo = 0;
+  let total = 0,
+    done = 0,
+    doing = 0,
+    todo = 0;
 
   for (const t of themes) {
-    // theme itself counts as 1 “unit”
     const tid = safeId(t.name);
     const tStatus = statuses[tid] || Status.todo;
     total += 1;
@@ -113,13 +114,10 @@ function computeStats(themes, statuses) {
   return { total, done, doing, todo };
 }
 
-function pct(n, d) {
-  if (!d) return 0;
-  return Math.round((n / d) * 100);
-}
-
 function renderStats(stats) {
   const el = document.getElementById("stats");
+  if (!el) return;
+
   el.innerHTML = "";
 
   const rows = [
@@ -164,42 +162,88 @@ function makeStatusControls(current, onSet) {
   for (const [s, label] of options) {
     const b = document.createElement("button");
     b.className = "pill" + (current === s ? " active" : "");
-    b.dataset.status = s;
     b.textContent = label;
-    b.addEventListener("click", () => onSet(s));
+
+    b.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      wrap.querySelectorAll(".pill").forEach((x) => x.classList.remove("active"));
+      b.classList.add("active");
+      onSet(s);
+    });
+
     wrap.appendChild(b);
   }
+
   return wrap;
 }
 
-function render(themes, contentsMap, statuses, filterText) {
-  const list = document.getElementById("list");
-  list.innerHTML = "";
+// ============================
+// VIEW MANAGEMENT
+// ============================
+function setView(view) {
+  document.getElementById("view-programme")?.classList.toggle("hidden", view !== "programme");
+  document.getElementById("view-football")?.classList.toggle("hidden", view !== "football");
 
-  const q = (filterText || "").trim().toLowerCase();
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.view === view);
+  });
+}
+
+// ============================
+// API (Google Apps Script)
+// ============================
+async function apiGet(route, params = {}) {
+  const url = new URL(API_BASE_URL);
+  url.searchParams.set("route", route);
+  url.searchParams.set("key", API_KEY);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+
+  const r = await fetch(url.toString(), { cache: "no-store" });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || "API error");
+  return j;
+}
+
+// ============================
+// FOOTBALL PAGE (private content)
+// ============================
+async function loadFootballPage() {
+  const resp = await apiGet("page", { slug: "football" });
+  const page = resp.page || {};
+
+  const titleEl = document.getElementById("footballTitle");
+  const bodyEl = document.getElementById("footballBody");
+
+  if (titleEl) titleEl.textContent = page.title || "Compte rendu – Terrain de football";
+  if (bodyEl) bodyEl.textContent = page.body || "— (Aucun contenu pour le moment)";
+}
+
+// ============================
+// RENDER PROGRAMME (structure + statuses only)
+// ============================
+function renderProgramme(themes, statuses, filterText, updateUI) {
+  const list = document.getElementById("list");
+  if (!list) return;
+
+  list.innerHTML = "";
+  const q = String(filterText || "").trim().toLowerCase();
 
   for (const theme of themes) {
-    const themeContent = getContent(contentsMap, theme.name);
     const themeId = safeId(theme.name);
     const themeStatus = statuses[themeId] || Status.todo;
 
-    // theme match logic
-    let themeMatches = !q || theme.name.toLowerCase().includes(q) || themeContent.toLowerCase().includes(q);
+    let themeMatches = !q || theme.name.toLowerCase().includes(q);
 
-    const itemsRendered = [];
+    const itemRows = [];
     for (const it of theme.items) {
       const itemId = safeId(`${theme.name} > ${it.name}`);
       const itemStatus = statuses[itemId] || Status.todo;
-      const itemContent = getContent(contentsMap, theme.name, it.name);
 
-      const itemMatches = !q ||
-        it.name.toLowerCase().includes(q) ||
-        itemContent.toLowerCase().includes(q) ||
-        theme.name.toLowerCase().includes(q);
-
+      const itemMatches = !q || it.name.toLowerCase().includes(q) || theme.name.toLowerCase().includes(q);
       if (itemMatches) {
         themeMatches = true;
-        itemsRendered.push({ it, itemId, itemStatus, itemContent });
+        itemRows.push({ it, itemId, itemStatus });
       }
     }
 
@@ -222,7 +266,7 @@ function render(themes, contentsMap, statuses, filterText) {
 
     const badge = document.createElement("span");
     badge.className = "badge";
-    badge.textContent = `${itemsRendered.length || theme.items.length} item(s)`;
+    badge.textContent = `${itemRows.length || theme.items.length} item(s)`;
 
     const chev = document.createElement("span");
     chev.className = "chev";
@@ -235,7 +279,7 @@ function render(themes, contentsMap, statuses, filterText) {
     const items = document.createElement("div");
     items.className = "items";
 
-    // Theme “card” itself (so you can mark theme done independently)
+    // Theme card (status only)
     const themeCard = document.createElement("div");
     themeCard.className = "item";
 
@@ -243,7 +287,7 @@ function render(themes, contentsMap, statuses, filterText) {
     themeTop.className = "item-top";
 
     const themeName = document.createElement("div");
-    themeName.innerHTML = `<div class="item-name">Contenu du thème</div>`;
+    themeName.innerHTML = `<div class="item-name">Statut du thème</div>`;
 
     const themeControls = makeStatusControls(themeStatus, (s) => {
       statuses[themeId] = s;
@@ -253,33 +297,21 @@ function render(themes, contentsMap, statuses, filterText) {
 
     themeTop.appendChild(themeName);
     themeTop.appendChild(themeControls);
-
     themeCard.appendChild(themeTop);
 
-    if (themeContent) {
-      const cb = document.createElement("div");
-      cb.className = "content-block";
-      cb.textContent = themeContent;
-      themeCard.appendChild(cb);
-    } else {
-      const cb = document.createElement("div");
-      cb.className = "content-block";
-      cb.textContent = "— (Pas de contenu pour ce thème dans contents.txt)";
-      themeCard.appendChild(cb);
-    }
+    const themePlaceholder = document.createElement("div");
+    themePlaceholder.className = "content-block";
+    themePlaceholder.textContent = "— (Contenu chargé depuis Google Sheets)";
+    themeCard.appendChild(themePlaceholder);
 
     items.appendChild(themeCard);
 
-    // Items
-    const displayItems = itemsRendered.length ? itemsRendered : theme.items.map(it => {
-      const itemId = safeId(`${theme.name} > ${it.name}`);
-      return {
-        it,
-        itemId,
-        itemStatus: statuses[itemId] || Status.todo,
-        itemContent: getContent(contentsMap, theme.name, it.name),
-      };
-    });
+    const displayItems = itemRows.length
+      ? itemRows
+      : theme.items.map((it) => {
+          const itemId = safeId(`${theme.name} > ${it.name}`);
+          return { it, itemId, itemStatus: statuses[itemId] || Status.todo };
+        });
 
     for (const r of displayItems) {
       const card = document.createElement("div");
@@ -303,7 +335,7 @@ function render(themes, contentsMap, statuses, filterText) {
 
       const cb = document.createElement("div");
       cb.className = "content-block";
-      cb.textContent = r.itemContent ? r.itemContent : "— (Pas de contenu pour cet item dans contents.txt)";
+      cb.textContent = "— (Contenu chargé depuis Google Sheets)";
       card.appendChild(cb);
 
       items.appendChild(card);
@@ -320,62 +352,58 @@ function render(themes, contentsMap, statuses, filterText) {
     container.appendChild(items);
     list.appendChild(container);
   }
-
-  function updateUI() {
-    const stats = computeStats(themes, statuses);
-    renderStats(stats);
-    render(themes, contentsMap, statuses, document.getElementById("search").value);
-  }
 }
 
-function download(filename, text) {
-  const el = document.createElement("a");
-  el.setAttribute("href", "data:text/plain;charset=utf-8," + encodeURIComponent(text));
-  el.setAttribute("download", filename);
-  document.body.appendChild(el);
-  el.click();
-  el.remove();
-}
-
+// ============================
+// MAIN
+// ============================
 async function main() {
-  const errorEl = document.getElementById("error");
   try {
-    const [themesTxt, contentsTxt] = await Promise.all([
-      fetchText(THEMES_URL),
-      fetchText(CONTENTS_URL),
-    ]);
+    setError("");
 
+    const themesTxt = await fetchText(THEMES_URL);
     const themes = parseThemes(themesTxt);
-    const contentsMap = parseContents(contentsTxt);
+
     const statuses = loadStatuses();
 
-    const stats = computeStats(themes, statuses);
-    renderStats(stats);
-    render(themes, contentsMap, statuses, "");
+    const updateUI = (filter = "") => {
+      renderStats(computeStats(themes, statuses));
+      renderProgramme(themes, statuses, filter, () => updateUI(document.getElementById("search")?.value || ""));
+    };
 
-	const searchEl = document.getElementById("search");
-	if (searchEl) {
-	  searchEl.addEventListener("input", (e) => {
-		render(themes, contentsMap, statuses, e.target.value);
-		renderStats(computeStats(themes, statuses));
-	  });
-	}
+    // Initial render
+    updateUI("");
 
-	const exportBtn = document.getElementById("exportBtn");
-	if (exportBtn) {
-	  exportBtn.addEventListener("click", () => {
-		const payload = {
-		  exported_at: new Date().toISOString(),
-		  statuses
-		};
-		download("programme_status_export.json", JSON.stringify(payload, null, 2));
-	  });
-	}
+    // Search binding (safe)
+    const searchEl = document.getElementById("search");
+    if (searchEl) {
+      searchEl.addEventListener("input", (e) => {
+        updateUI(e.target.value || "");
+      });
+    }
 
+    // Tabs
+    document.querySelectorAll(".tab").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const view = btn.dataset.view;
+        setView(view);
 
+        if (view === "football") {
+          try {
+            await loadFootballPage();
+          } catch (err) {
+            setError(err?.message || String(err));
+          }
+        } else {
+          setError("");
+        }
+      });
+    });
+
+    // Default view
+    setView("programme");
   } catch (err) {
-    errorEl.classList.remove("hidden");
-    errorEl.textContent = String(err?.message || err);
+    setError(err?.message || String(err));
   }
 }
 
