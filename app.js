@@ -366,7 +366,7 @@ async function main() {
 	  exportBtn.addEventListener("click", () => {
 		const payload = {
 		  exported_at: new Date().toISOString(),
-		  statuses,
+		  statuses
 		};
 		download("programme_status_export.json", JSON.stringify(payload, null, 2));
 	  });
