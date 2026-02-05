@@ -361,13 +361,6 @@ async function main() {
 	  });
 	}
 
-
-	const elXXXX = document.getElementById("XXXX");
-	if (elXXXX) {
-	  elXXXX.addEventListener("YYY", ...);
-	}
-
-
 	const exportBtn = document.getElementById("exportBtn");
 	if (exportBtn) {
 	  exportBtn.addEventListener("click", () => {
