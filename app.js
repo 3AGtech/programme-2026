@@ -362,18 +362,23 @@ async function main() {
 	}
 
 
-    document.getElementById("resetBtn").addEventListener("click", () => {
-      localStorage.removeItem(STORAGE_KEY);
-      location.reload();
-    });
+	const elXXXX = document.getElementById("XXXX");
+	if (elXXXX) {
+	  elXXXX.addEventListener("YYY", ...);
+	}
 
-    document.getElementById("exportBtn").addEventListener("click", () => {
-      const payload = {
-        exported_at: new Date().toISOString(),
-        statuses,
-      };
-      download("programme_status_export.json", JSON.stringify(payload, null, 2));
-    });
+
+	const exportBtn = document.getElementById("exportBtn");
+	if (exportBtn) {
+	  exportBtn.addEventListener("click", () => {
+		const payload = {
+		  exported_at: new Date().toISOString(),
+		  statuses,
+		};
+		download("programme_status_export.json", JSON.stringify(payload, null, 2));
+	  });
+	}
+
 
   } catch (err) {
     errorEl.classList.remove("hidden");
