@@ -353,10 +353,14 @@ async function main() {
     renderStats(stats);
     render(themes, contentsMap, statuses, "");
 
-    document.getElementById("search").addEventListener("input", (e) => {
-      render(themes, contentsMap, statuses, e.target.value);
-      renderStats(computeStats(themes, statuses));
-    });
+	const searchEl = document.getElementById("search");
+	if (searchEl) {
+	  searchEl.addEventListener("input", (e) => {
+		render(themes, contentsMap, statuses, e.target.value);
+		renderStats(computeStats(themes, statuses));
+	  });
+	}
+
 
     document.getElementById("resetBtn").addEventListener("click", () => {
       localStorage.removeItem(STORAGE_KEY);
